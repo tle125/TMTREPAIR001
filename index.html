@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบบันทึกการชาร์จไฟรถไฟฟ้า - Firebase Real-time</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Sarabun', sans-serif;
+        }
+        .charging-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .status-charging { background-color: #F59E0B; animation: pulse 2s infinite; }
+        .status-completed { background-color: #3B82F6; }
+        .live-indicator {
+            animation: pulse-live 2s infinite;
+        }
+        @keyframes pulse-live {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <!-- Login Overlay -->
+    <div id="login-overlay" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-md">
+            <h2 class="text-2xl sm:text-3xl font-bold text-center text-gray-800 mb-2">🔐 ยืนยันตัวตน</h2>
+            <p class="text-center text-gray-500 mb-6">กรุณาเข้าสู่ระบบเพื่อใช้งาน</p>
+            <div class="space-y-4">
+                <div>
+                    <label for="login-user" class="block text-sm font-semibold text-gray-700 mb-2">ชื่อผู้ใช้</label>
+                    <select id="login-user" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                        <option value="">กำลังโหลดรายชื่อ...</option>
+                    </select>
+                </div>
+                <div id="login-vehicle-wrapper">
+                    <label for="login-vehicle" class="block text-sm font-semibold text-gray-700 mb-2">ทะเบียนรถ</label>
+                    <select id="login-vehicle" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></select>
+                </div>
+                <div id="login-charger-wrapper">
+                    <label for="login-charger" class="block text-sm font-semibold text-gray-700 mb-2">เครื่องชาร์จ</label>
+                    <select id="login-charger" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></select>
+                </div>
+                <div>
+                    <label for="login-password" class="block text-sm font-semibold text-gray-700 mb-2">รหัสผ่าน</label>
+                    <input type="password" id="login-password" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="กรอกรหัสผ่านของคุณ">
+                </div>
+                <button id="login-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200 shadow-lg">
+                    เข้าสู่ระบบ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App Container (hidden by default) -->
+    <div class="container mx-auto px-2 sm:px-4 max-w-7xl py-8 hidden">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold text-gray-800 mb-2">⚡ ระบบบันทึกการชาร์จไฟรถไฟฟ้า</h1>
+            <p class="text-gray-600">บันทึกข้อมูลการชาร์จหลายคัน (Real-time)</p>
+            <!-- Navigation Menu -->
+            <div class="flex justify-center mt-6">
+                <div class="bg-white rounded-lg shadow-lg p-2 flex space-x-1 sm:space-x-2">
+                    <button onclick="window.showSection('charging')" id="btn-charging"
+                            class="px-4 sm:px-6 py-2 rounded-lg font-medium transition duration-200 bg-blue-600 text-white text-sm sm:text-base">
+                        🔋 การชาร์จ
+                    </button>
+                    <button onclick="window.showSection('summary')" id="btn-summary"
+                            class="px-4 sm:px-6 py-2 rounded-lg font-medium transition duration-200 text-gray-600 hover:bg-gray-100 text-sm sm:text-base">
+                        📊 สรุปการชาร์จ
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charging Section -->
+        <div id="chargingSection">
+            <!-- New Charging Form -->
+            <div id="new-charging-wrapper" class="bg-white rounded-2xl shadow-xl mb-8">
+                <div class="p-4 sm:p-6 border-b border-gray-200">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-xl sm:text-2xl font-bold text-gray-800">➕ เริ่มการชาร์จใหม่</h2>
+                        <button onclick="window.toggleNewChargingForm()" id="toggleFormBtn"
+                                class="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 sm:px-4 py-2 rounded-lg transition duration-200 font-medium text-sm">
+                            <span id="toggleFormText">ซ่อน</span> 📝
+                        </button>
+                    </div>
+                </div>
+                <div id="newChargingFormContainer" class="p-4 sm:p-8">
+                    <form id="newChargingForm" class="space-y-6">
+                        <!-- Row 1: Date, License Plate, and Charger -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">วันที่</label>
+                                <input type="date" id="date" name="date" required
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">ทะเบียนรถ</label>
+                                <input type="hidden" id="licensePlate" name="licensePlate" required>
+                                <div class="grid grid-cols-2 gap-3" id="licensePlateButtons">
+                                    <!-- License plate buttons will be populated here -->
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">เครื่องชาร์จ</label>
+                                <input type="hidden" id="chargerName" name="chargerName" required>
+                                <div class="grid grid-cols-2 gap-3" id="chargerButtons">
+                                    <!-- Charger buttons will be populated here -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Row 2: Mileage -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">เลขไมล์ครั้งก่อน</label>
+                                <input type="number" id="previousMileage" name="previousMileage" step="0.1" required readonly
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50" placeholder="เลือกทะเบียนรถก่อน">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">เลขไมล์ครั้งปัจจุบัน</label>
+                                <input type="number" id="currentMileage" name="currentMileage" step="0.1" required
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                        </div>
+
+                        <!-- Row 3: KWH Before and Price Info -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">เปอร์เซ็นต์ก่อนชาร์จ (%)</label>
+                                <input type="number" id="kwhBefore" name="kwhBefore" step="1" min="0" max="100" required
+                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                       placeholder="เช่น 20">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">ราคาต่อหน่วย (บาท)</label>
+                                <div class="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50 text-gray-700 font-medium" id="pricePerUnitDisplay">
+                                    เลือกเวลาเริ่มชาร์จ
+                                </div>
+                                <div class="text-xs text-gray-500 mt-1">
+                                    <div>🔴 ช่วงพีค: 12:00-13:00, 17:00-17:30 (4.1839 บาท)</div>
+                                    <div>🟢 ช่วงออฟพีค: 00:00-01:00, 05:00-05:30 (2.6037 บาท)</div>
+                                    <div>🟡 ช่วงปกติ: เวลาอื่นๆ (3.5000 บาท)</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Row 4: Start Button -->
+                        <div class="flex justify-center">
+                            <button type="button" id="startNewChargingBtn"
+                                    class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-8 rounded-lg transition duration-200 shadow-lg hover:shadow-xl">
+                                🔋 เริ่มชาร์จ
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Active Charging Sessions -->
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-6 mb-8">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                    <div class="flex items-center space-x-3">
+                        <h2 class="text-xl sm:text-2xl font-bold text-gray-800">🔋 การชาร์จที่กำลังดำเนินการ</h2>
+                        <div id="liveStatus" class="flex items-center text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700">
+                            <div class="w-2 h-2 rounded-full bg-green-500 mr-2 live-indicator"></div>
+                            <span>LIVE</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-4 text-xs sm:text-sm">
+                        <span class="status-indicator status-charging"></span>กำลังชาร์จ
+                        <span class="status-indicator status-completed ml-4"></span>พร้อมบันทึก
+                    </div>
+                </div>
+                <div id="activeChargingSessions" class="space-y-4"></div>
+            </div>
+
+            <!-- Vehicle Status Overview -->
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-6 mb-8">
+                <h2 class="text-xl sm:text-2xl font-bold text-gray-800 mb-4">🚗 สถานะรถทั้งหมด</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4" id="vehicleStatusGrid"></div>
+            </div>
+
+            <!-- Charger Status Overview -->
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-6 mb-8">
+                <h2 class="text-xl sm:text-2xl font-bold text-gray-800 mb-4">🔌 สถานะเครื่องชาร์จทั้งหมด</h2>
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-2 sm:gap-4" id="chargerStatusGrid"></div>
+            </div>
+
+            <!-- Charging History -->
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-8 mb-8">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                    <h2 class="text-xl sm:text-2xl font-bold text-gray-800">📈 ประวัติการชาร์จทั้งหมด</h2>
+                    <div class="flex space-x-2 w-full sm:w-auto">
+                        <select id="historyVehicleFilter" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <option value="">ทุกคัน</option>
+                        </select>
+                        <select id="historyMonthFilter" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <option value="">ทุกเดือน</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="chargingHistoryContainer" class="overflow-x-auto"></div>
+            </div>
+        </div> <!-- End Charging Section -->
+
+        <!-- Summary Section -->
+        <div id="summarySection" class="hidden">
+            <!-- Summary Filters -->
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-6 mb-8">
+                <div class="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
+                    <h2 class="text-xl sm:text-2xl font-bold text-gray-800">📊 สรุปการชาร์จ</h2>
+                    <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 w-full md:w-auto">
+                        <select id="summaryVehicleFilter" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="">ทุกคัน</option>
+                        </select>
+                        <select id="summaryMonthFilter" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="">ทุกเดือน</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div class="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl shadow-xl p-6 text-white">
+                    <div class="flex items-center justify-between"><div><p class="text-blue-100 text-sm">จำนวนครั้งทั้งหมด</p><p class="text-3xl font-bold" id="totalSessions">0</p></div><div class="text-4xl opacity-80">🔋</div></div>
+                </div>
+                <div class="bg-gradient-to-r from-green-500 to-green-600 rounded-2xl shadow-xl p-6 text-white">
+                    <div class="flex items-center justify-between"><div><p class="text-green-100 text-sm">ค่าไฟรวม</p><p class="text-3xl font-bold" id="totalCost">฿0</p></div><div class="text-4xl opacity-80">💰</div></div>
+                </div>
+                <div class="bg-gradient-to-r from-purple-500 to-purple-600 rounded-2xl shadow-xl p-6 text-white">
+                    <div class="flex items-center justify-between"><div><p class="text-purple-100 text-sm">หน่วยรวม</p><p class="text-3xl font-bold" id="totalUnits">0</p></div><div class="text-4xl opacity-80">⚡</div></div>
+                </div>
+                <div class="bg-gradient-to-r from-orange-500 to-orange-600 rounded-2xl shadow-xl p-6 text-white">
+                    <div class="flex items-center justify-between"><div><p class="text-orange-100 text-sm">เวลารวม</p><p class="text-3xl font-bold" id="totalTime">0</p></div><div class="text-4xl opacity-80">⏱️</div></div>
+                </div>
+            </div>
+
+            <!-- Charts Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-6"><h3 class="text-lg sm:text-xl font-bold text-gray-800 mb-4">💰 ค่าไฟแต่ละคัน</h3><div class="h-80"><canvas id="costChart"></canvas></div></div>
+                <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-6"><h3 class="text-lg sm:text-xl font-bold text-gray-800 mb-4">🔋 จำนวนครั้งแต่ละคัน</h3><div class="h-80"><canvas id="sessionsChart"></canvas></div></div>
+            </div>
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-6 mb-8">
+                <h3 class="text-lg sm:text-xl font-bold text-gray-800 mb-4">🔌 จำนวนครั้งที่ใช้งานแต่ละเครื่องชาร์จ</h3>
+                <div class="h-80"><canvas id="chargerUsageChart"></canvas></div>
+            </div>
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-6 mb-8">
+                <h3 class="text-lg sm:text-xl font-bold text-gray-800 mb-4">📈 แนวโน้มรายเดือน</h3>
+                <div class="h-96"><canvas id="monthlyTrendChart"></canvas></div>
+            </div>
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-8 mb-8">
+                <h3 class="text-lg sm:text-xl font-bold text-gray-800 mb-6">🚗 สถิติแต่ละคัน</h3>
+                <div id="vehicleStatsContainer"></div>
+            </div>
+            <div class="bg-white rounded-2xl shadow-xl p-4 sm:p-8">
+                <h3 class="text-lg sm:text-xl font-bold text-gray-800 mb-6">🔌 สถิติแต่ละเครื่องชาร์จ</h3>
+                <div id="chargerStatsContainer"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="auth-status" class="fixed bottom-4 right-4 bg-white shadow-lg rounded-lg px-4 py-2 text-xs text-gray-600">
+        กำลังเชื่อมต่อ...
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        // Import Firebase modules
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, onSnapshot, collection, query, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- CONFIGURATION ---
+        const vehicles = ['TT-19', 'TT-20', 'TT-21', 'TT-22', 'TT-23', 'TT-24']; 
+        const chargers = ['EV-C1', 'EV-C2', 'EV-C3', 'EV-C4', 'EV-C5'];
+        
+        // --- GLOBAL STATE ---
+        let db, auth;
+        let firebaseUserId = null;
+        let appId = 'sodium-burner-428202-f9'; 
+        let currentUser = null; 
+        let allUsers = {};
+
+        let vehicleStatuses = {};
+        let chargerStatuses = {};
+        let allHistoryRecords = []; 
+        let summaryCharts = {};
+
+        // Register Chart.js plugins
+        Chart.register(ChartDataLabels);
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', async function() {
+            try {
+                const firebaseConfig = {
+                  apiKey: "AIzaSyCEN8ANVFzs2dExfJP-HDTuRGxtV3TYzHU",
+                  authDomain: "sodium-burner-428202-f9.firebaseapp.com",
+                  projectId: "sodium-burner-428202-f9",
+                  storageBucket: "sodium-burner-428202-f9.appspot.com",
+                  messagingSenderId: "46765828618",
+                  appId: "1:46765828618:web:59eb170cfcd92c0e578df3",
+                  measurementId: "G-MJ19J3TF2R"
+                };
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                Swal.fire('Error', 'ไม่สามารถเชื่อมต่อกับฐานข้อมูลได้', 'error');
+                return;
+            }
+
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    firebaseUserId = user.uid;
+                    console.log("Firebase user authenticated:", firebaseUserId);
+                    document.getElementById('auth-status').innerHTML = `🟢 Connected`;
+                    
+                    await initializeSystemState();
+                    await seedInitialUsers(); 
+                    await setupLoginScreen();
+
+                } else {
+                    console.log("User is not signed in. Attempting to sign in anonymously.");
+                    document.getElementById('auth-status').textContent = '🟡 Authenticating...';
+                    try {
+                        await signInAnonymously(auth);
+                    } catch (error) {
+                        console.error("Anonymous authentication failed:", error);
+                        document.getElementById('auth-status').textContent = '🔴 Auth Failed';
+                    }
+                }
+            });
+        });
+
+        // --- LOGIN SYSTEM ---
+        async function setupLoginScreen() {
+            const usersColRef = collection(db, `artifacts/${appId}/users`);
+            const userSnapshot = await getDocs(usersColRef);
+            const userSelect = document.getElementById('login-user');
+            const vehicleSelect = document.getElementById('login-vehicle');
+            const chargerSelect = document.getElementById('login-charger');
+            const vehicleWrapper = document.getElementById('login-vehicle-wrapper');
+            const chargerWrapper = document.getElementById('login-charger-wrapper');
+
+            allUsers = {};
+            userSelect.innerHTML = '<option value="">-- เลือกชื่อผู้ใช้ --</option>';
+            userSnapshot.forEach(doc => {
+                allUsers[doc.id] = doc.data();
+                userSelect.innerHTML += `<option value="${doc.id}">${doc.data().name}</option>`;
+            });
+
+            vehicleSelect.innerHTML = '<option value="">-- เลือกรถ --</option>';
+            vehicles.forEach(v => vehicleSelect.innerHTML += `<option value="${v}">${v}</option>`);
+
+            chargerSelect.innerHTML = '<option value="">-- เลือกเครื่องชาร์จ --</option>';
+            chargers.forEach(c => chargerSelect.innerHTML += `<option value="${c}">${c}</option>`);
+            
+            userSelect.addEventListener('change', () => {
+                const selectedUserId = userSelect.value;
+                const selectedUser = allUsers[selectedUserId];
+                if (selectedUser && selectedUser.role === 'supervisor') {
+                    vehicleWrapper.style.display = 'none';
+                    chargerWrapper.style.display = 'none';
+                } else {
+                    vehicleWrapper.style.display = 'block';
+                    chargerWrapper.style.display = 'block';
+                }
+            });
+
+            document.getElementById('login-btn').addEventListener('click', handleLogin);
+        }
+
+        async function handleLogin() {
+            const loginButton = document.getElementById('login-btn');
+            loginButton.disabled = true;
+            loginButton.textContent = 'กำลังตรวจสอบ...';
+
+            const userId = document.getElementById('login-user').value;
+            const vehicle = document.getElementById('login-vehicle').value;
+            const charger = document.getElementById('login-charger').value;
+            const password = document.getElementById('login-password').value;
+            const selectedUser = allUsers[userId];
+
+            if (!userId || !password) {
+                Swal.fire('ข้อมูลไม่ครบ', 'กรุณาเลือกชื่อผู้ใช้และกรอกรหัสผ่าน', 'warning');
+                loginButton.disabled = false;
+                loginButton.textContent = 'เข้าสู่ระบบ';
+                return;
+            }
+
+            try {
+                if (!selectedUser) {
+                    throw new Error('ไม่พบผู้ใช้นี้ในระบบ');
+                }
+
+                if (selectedUser.password !== password) {
+                    throw new Error('รหัสผ่านไม่ถูกต้อง');
+                }
+
+                const stateDocRef = doc(db, `artifacts/${appId}/state/main`);
+                const stateDocSnap = await getDoc(stateDocRef);
+                
+                if (!stateDocSnap.exists()) {
+                     throw new Error('ไม่พบข้อมูลสถานะของระบบ กรุณาติดต่อผู้ดูแล');
+                }
+
+                const stateData = stateDocSnap.data();
+                vehicleStatuses = stateData.vehicleStatuses || {};
+                chargerStatuses = stateData.chargerStatuses || {};
+
+                currentUser = {
+                    name: selectedUser.name,
+                    role: selectedUser.role || 'employee'
+                };
+
+                if (currentUser.role === 'employee') {
+                    if (!vehicle || !charger) {
+                        throw new Error('พนักงานต้องเลือกรถและเครื่องชาร์จ');
+                    }
+                    
+                    const vehicleStatus = vehicleStatuses[vehicle];
+                    const chargerStatus = chargerStatuses[charger];
+
+                    if (vehicleStatus?.status === 'out-of-service') {
+                        throw new Error(`ทะเบียนรถ ${vehicle} ไม่พร้อมใช้งาน (แจ้งเสีย)`);
+                    }
+                     if (chargerStatus?.status === 'out-of-service') {
+                        throw new Error(`เครื่องชาร์จ ${charger} ไม่พร้อมใช้งาน (แจ้งเสีย)`);
+                    }
+
+                    if (vehicleStatus && vehicleStatus.status !== 'available') {
+                        const activeSessionRef = doc(db, `artifacts/${appId}/active_sessions`, vehicleStatus.sessionId);
+                        const activeSessionSnap = await getDoc(activeSessionRef);
+                        if (!activeSessionSnap.exists() || activeSessionSnap.data().startedBy !== currentUser.name) {
+                            throw new Error(`ทะเบียนรถ ${vehicle} กำลังใช้งานโดยผู้ใช้อื่น`);
+                        }
+                    }
+                    
+                    if (chargerStatus && chargerStatus.status !== 'available') {
+                         const activeSessionRef = doc(db, `artifacts/${appId}/active_sessions`, chargerStatus.sessionId);
+                        const activeSessionSnap = await getDoc(activeSessionRef);
+                         if (!activeSessionSnap.exists() || activeSessionSnap.data().startedBy !== currentUser.name) {
+                            throw new Error(`เครื่องชาร์จ ${charger} กำลังใช้งานโดยผู้ใช้อื่น`);
+                        }
+                    }
+                    currentUser.vehicle = vehicle;
+                    currentUser.charger = charger;
+                }
+                
+                document.getElementById('login-overlay').classList.add('hidden');
+                document.querySelector('.container').classList.remove('hidden');
+                
+                setupRealtimeListeners();
+                initializeUI();
+
+                if (currentUser.role === 'employee') {
+                    prepopulateForm(currentUser.vehicle, currentUser.charger);
+                } else {
+                    document.getElementById('new-charging-wrapper').style.display = 'none';
+                }
+
+            } catch (error) {
+                Swal.fire('เข้าสู่ระบบล้มเหลว', error.message, 'error');
+            } finally {
+                loginButton.disabled = false;
+                loginButton.textContent = 'เข้าสู่ระบบ';
+            }
+        }
+
+        function prepopulateForm(vehicle, charger) {
+            window.selectLicensePlate(vehicle);
+            window.selectCharger(charger);
+
+            document.querySelectorAll('#licensePlateButtons button, #chargerButtons button').forEach(btn => {
+                btn.disabled = true;
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+                btn.onclick = null;
+            });
+        }
+
+        async function seedInitialUsers() {
+            const usersColRef = collection(db, `artifacts/${appId}/users`);
+            const snapshot = await getDocs(usersColRef);
+            
+            const existingUsers = new Set();
+            snapshot.forEach(doc => {
+                existingUsers.add(doc.data().name);
+            });
+
+            const sampleUsers = [
+                { name: "หัวหน้างาน", password: "super", role: "supervisor" },
+                { name: "นายกฤษฎา เกิดเสม", password: "55053156", role: "supervisor" },
+                { name: "นางพุสดี ศรีวัฒนา", password: "48070418", role: "supervisor" },
+                { name: "นายผ่อง คลอนโพธิ์", password: "1234", role: "supervisor" },
+                { name: "นางสาวศิรินภา จิณศิริ", password: "64060030", role: "supervisor" }
+            ];
+
+            const newUsers = sampleUsers.filter(user => !existingUsers.has(user.name));
+
+            if (newUsers.length > 0) {
+                console.log(`Found ${newUsers.length} new users to seed...`);
+                const batch = writeBatch(db);
+                newUsers.forEach(user => {
+                    const newUserRef = doc(usersColRef);
+                    batch.set(newUserRef, user);
+                });
+                await batch.commit();
+                console.log("New users seeded.");
+            } else {
+                console.log("No new users to seed.");
+            }
+        }
+
+
+        function initializeUI() {
+            createLicensePlateButtons();
+            createChargerButtons();
+            setTodayDate();
+            initializeHistoryFilters();
+            initializeSummaryFilters();
+            
+            document.getElementById('historyVehicleFilter').addEventListener('change', () => displayChargingHistory(allHistoryRecords));
+            document.getElementById('historyMonthFilter').addEventListener('change', () => displayChargingHistory(allHistoryRecords));
+            document.getElementById('summaryVehicleFilter').addEventListener('change', loadSummaryData);
+            document.getElementById('summaryMonthFilter').addEventListener('change', loadSummaryData);
+            
+            updatePricePerUnitDisplay();
+            setInterval(updatePricePerUnitDisplay, 60000);
+        }
+
+        function setupRealtimeListeners() {
+            if (!db || !firebaseUserId) return;
+
+            const stateDocRef = doc(db, `artifacts/${appId}/state/main`);
+            const activeSessionsColRef = collection(db, `artifacts/${appId}/active_sessions`);
+            const historyColRef = collection(db, `artifacts/${appId}/history`);
+
+            onSnapshot(stateDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    vehicleStatuses = data.vehicleStatuses || {};
+                    chargerStatuses = data.chargerStatuses || {};
+                } 
+                updateVehicleStatusGrid();
+                updateChargerStatusGrid();
+            });
+
+            onSnapshot(query(activeSessionsColRef), (snapshot) => {
+                const activeSessions = {};
+                snapshot.forEach(doc => {
+                    activeSessions[doc.id] = { ...doc.data(), sessionId: doc.id };
+                });
+                updateActiveChargingSessions(activeSessions);
+            });
+
+            onSnapshot(query(historyColRef), (snapshot) => {
+                allHistoryRecords = [];
+                snapshot.forEach(doc => {
+                    allHistoryRecords.push({ ...doc.data(), id: doc.id });
+                });
+                allHistoryRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+                displayChargingHistory(allHistoryRecords);
+                loadSummaryData();
+            });
+        }
+
+        async function initializeSystemState() {
+            const stateDocRef = doc(db, `artifacts/${appId}/state/main`);
+            const docSnap = await getDoc(stateDocRef);
+            let needsUpdate = false;
+            let currentVehicleStatuses = {};
+            let currentChargerStatuses = {};
+
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                currentVehicleStatuses = data.vehicleStatuses || {};
+                currentChargerStatuses = data.chargerStatuses || {};
+            } else {
+                needsUpdate = true;
+            }
+
+            vehicles.forEach(v => {
+                if (!currentVehicleStatuses[v]) {
+                    currentVehicleStatuses[v] = { status: 'available', lastMileage: 0, sessionId: null };
+                    needsUpdate = true;
+                    console.log(`Adding new vehicle '${v}' to state.`);
+                }
+            });
+
+            chargers.forEach(c => {
+                if (!currentChargerStatuses[c]) {
+                    currentChargerStatuses[c] = { status: 'available', totalUsage: 0, sessionId: null };
+                    needsUpdate = true;
+                    console.log(`Adding new charger '${c}' to state.`);
+                }
+            });
+
+            if (needsUpdate) {
+                try {
+                    await setDoc(stateDocRef, {
+                        vehicleStatuses: currentVehicleStatuses,
+                        chargerStatuses: currentChargerStatuses,
+                        lastUpdated: new Date().toISOString()
+                    }, { merge: true });
+                    console.log("System state initialized/updated successfully.");
+                } catch (error) {
+                    console.error("Error initializing/updating system state:", error);
+                }
+            } else {
+                console.log("System state is up to date.");
+            }
+        }
+
+        function updateVehicleStatusGrid() {
+            const grid = document.getElementById('vehicleStatusGrid');
+            grid.innerHTML = '';
+            vehicles.forEach(vehicle => {
+                const status = vehicleStatuses[vehicle] || { status: 'available', lastMileage: 0 };
+                const card = document.createElement('div');
+                let statusColor = '', statusText = '', statusIcon = '';
+                switch(status.status) {
+                    case 'available': statusColor = 'border-green-200 bg-green-50'; statusText = 'พร้อมใช้งาน'; statusIcon = '✅'; break;
+                    case 'charging': statusColor = 'border-yellow-200 bg-yellow-50'; statusText = 'กำลังชาร์จ'; statusIcon = '🔋'; break;
+                    case 'completed': statusColor = 'border-blue-200 bg-blue-50'; statusText = 'พร้อมบันทึก'; statusIcon = '⏹️'; break;
+                    case 'out-of-service': statusColor = 'border-red-200 bg-red-50'; statusText = 'ไม่พร้อมใช้งาน'; statusIcon = '❌'; break;
+                }
+                card.className = `p-2 sm:p-4 border rounded-lg text-center flex flex-col justify-between`;
+                let cardHTML = `<div><div class="text-xl sm:text-2xl mb-2">${statusIcon}</div><div class="font-semibold text-sm sm:text-base text-gray-800">${vehicle}</div><div class="text-xs sm:text-sm text-gray-600">${statusText}</div>${status.lastMileage ? `<div class="text-xs text-gray-500 mt-1">ไมล์: ${status.lastMileage}</div>` : ''}</div>`;
+                
+                if (currentUser && currentUser.role === 'supervisor') {
+                    const isOutOfService = status.status === 'out-of-service';
+                    const buttonText = isOutOfService ? 'เปิดใช้งาน' : 'แจ้งเสีย';
+                    const buttonColor = isOutOfService ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+                    cardHTML += `<button onclick="window.toggleVehicleStatus('${vehicle}')" class="mt-2 text-xs font-semibold py-1 px-2 rounded-full ${buttonColor}">${buttonText}</button>`;
+                }
+                card.innerHTML = cardHTML;
+                grid.appendChild(card);
+            });
+        }
+
+        function updateChargerStatusGrid() {
+            const grid = document.getElementById('chargerStatusGrid');
+            grid.innerHTML = '';
+            chargers.forEach(charger => {
+                const status = chargerStatuses[charger] || { status: 'available', totalUsage: 0 };
+                const card = document.createElement('div');
+                let statusColor = '', statusText = '', statusIcon = '';
+                switch(status.status) {
+                    case 'available': statusColor = 'border-green-200 bg-green-50'; statusText = 'พร้อมใช้งาน'; statusIcon = '🔌'; break;
+                    case 'in-use': statusColor = 'border-orange-200 bg-orange-50'; statusText = 'กำลังใช้งาน'; statusIcon = '⚡'; break;
+                    case 'out-of-service': statusColor = 'border-red-200 bg-red-50'; statusText = 'ไม่พร้อมใช้งาน'; statusIcon = '❌'; break;
+                }
+                card.className = `p-2 sm:p-4 border rounded-lg text-center flex flex-col justify-between`;
+                let cardHTML = `<div><div class="text-xl sm:text-2xl mb-2">${statusIcon}</div><div class="font-semibold text-sm sm:text-base text-gray-800">${charger}</div><div class="text-sm text-gray-600">${statusText}</div><div class="text-xs text-gray-500 mt-1">ใช้แล้ว: ${status.totalUsage} ครั้ง</div></div>`;
+
+                if (currentUser && currentUser.role === 'supervisor') {
+                    const isOutOfService = status.status === 'out-of-service';
+                    const buttonText = isOutOfService ? 'เปิดใช้งาน' : 'แจ้งเสีย';
+                    const buttonColor = isOutOfService ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+                    cardHTML += `<button onclick="window.toggleChargerStatus('${charger}')" class="mt-2 text-xs font-semibold py-1 px-2 rounded-full ${buttonColor}">${buttonText}</button>`;
+                }
+                card.innerHTML = cardHTML;
+                grid.appendChild(card);
+            });
+        }
+
+        window.toggleVehicleStatus = async (vehicle) => {
+            const currentStatus = vehicleStatuses[vehicle]?.status;
+            if (currentStatus === 'charging' || currentStatus === 'completed') {
+                Swal.fire('ไม่สามารถเปลี่ยนสถานะ', 'รถกำลังอยู่ในกระบวนการชาร์จ', 'warning');
+                return;
+            }
+            const newStatus = currentStatus === 'out-of-service' ? 'available' : 'out-of-service';
+            const stateDocRef = doc(db, `artifacts/${appId}/state/main`);
+            try {
+                await updateDoc(stateDocRef, {
+                    [`vehicleStatuses.${vehicle}.status`]: newStatus
+                });
+            } catch (error) {
+                console.error("Error updating vehicle status:", error);
+                Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถอัปเดตสถานะได้', 'error');
+            }
+        };
+
+        window.toggleChargerStatus = async (charger) => {
+            const currentStatus = chargerStatuses[charger]?.status;
+             if (currentStatus === 'in-use') {
+                Swal.fire('ไม่สามารถเปลี่ยนสถานะ', 'เครื่องชาร์จกำลังใช้งานอยู่', 'warning');
+                return;
+            }
+            const newStatus = currentStatus === 'out-of-service' ? 'available' : 'out-of-service';
+            const stateDocRef = doc(db, `artifacts/${appId}/state/main`);
+            try {
+                await updateDoc(stateDocRef, {
+                    [`chargerStatuses.${charger}.status`]: newStatus
+                });
+            } catch (error) {
+                console.error("Error updating charger status:", error);
+                Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถอัปเดตสถานะได้', 'error');
+            }
+        };
+
+
+        function updateActiveChargingSessions(activeSessions) {
+            const container = document.getElementById('activeChargingSessions');
+            const activeSessionValues = Object.values(activeSessions);
+
+            if (activeSessionValues.length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-8">ยังไม่มีการชาร์จที่กำลังดำเนินการ</div>';
+                return;
+            }
+
+            container.innerHTML = '';
+            activeSessionValues.forEach(session => {
+                const sessionCard = document.createElement('div');
+                sessionCard.className = 'border rounded-lg p-4 sm:p-6';
+                sessionCard.id = `session-${session.sessionId}`;
+                
+                let statusBadge = '', actionButtons = '';
+                const isOwner = currentUser && currentUser.name === session.startedBy;
+                const canInteract = currentUser.role === 'employee' && isOwner;
+                
+                if (session.status === 'charging') {
+                    statusBadge = `<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800"><span class="w-2 h-2 rounded-full bg-yellow-500 mr-2 charging-pulse"></span>กำลังชาร์จ</span>`;
+                    const buttonClass = canInteract ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-400 cursor-not-allowed';
+                    const buttonDisabled = canInteract ? '' : 'disabled';
+                    const buttonTitle = canInteract ? '' : 'เฉพาะผู้ที่เริ่มชาร์จเท่านั้นที่สามารถทำรายการได้';
+                    actionButtons = `<div class="mt-4 space-y-3"><div><label class="block text-sm font-semibold text-gray-700 mb-2">เปอร์เซ็นต์หลังชาร์จ (%)</label><input type="number" id="kwhAfter-${session.sessionId}" step="1" min="0" max="100" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="เช่น 80"></div><button onclick="window.finishAndSaveCharging('${session.sessionId}')" class="w-full text-white font-semibold py-2 px-4 rounded-lg transition duration-200 ${buttonClass}" ${buttonDisabled} title="${buttonTitle}">⏹️ จบและบันทึกการชาร์จ</button></div>`;
+                }
+
+                sessionCard.innerHTML = `<div class="flex justify-between items-start mb-4"><div><h3 class="text-lg font-semibold text-gray-800">${session.licensePlate}</h3><p class="text-sm text-gray-600">เริ่มเมื่อ: ${session.startTime}</p><p class="text-sm text-green-600">เครื่องชาร์จ: ${session.chargerName}</p><p class="text-sm text-gray-500 font-medium">ผู้เริ่ม: ${session.startedBy || '-'}</p></div>${statusBadge}</div><div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm"><div><span class="text-gray-600">วันที่:</span><div class="font-semibold">${session.date}</div></div><div><span class="text-gray-600">เลขไมล์:</span><div class="font-semibold">${session.previousMileage} → ${session.currentMileage}</div></div><div><span class="text-gray-600">% ก่อน:</span><div class="font-semibold">${session.kwhBefore}%</div></div><div><span class="text-gray-600">ระยะเวลา:</span><div class="font-semibold">${session.duration || 'กำลังชาร์จ'}</div></div></div>${session.status === 'completed' ? `<div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-3 pt-3 border-t"><div><span class="text-gray-600">% หลัง:</span><div class="font-semibold">${session.kwhAfter}%</div></div><div><span class="text-gray-600">หน่วย:</span><div class="font-semibold">${session.units}</div></div><div><span class="text-gray-600">ราคา/หน่วย:</span><div class="font-semibold">฿${session.pricePerUnit}</div></div><div><span class="text-gray-600">ค่าไฟ:</span><div class="font-semibold text-green-600">฿${session.electricityCost}</div></div></div>` : ''}${actionButtons}`;
+                container.appendChild(sessionCard);
+            });
+        }
+        
+        document.getElementById('startNewChargingBtn').addEventListener('click', async function() {
+            const date = document.getElementById('date').value;
+            const licensePlate = document.getElementById('licensePlate').value;
+            const chargerName = document.getElementById('chargerName').value;
+            const previousMileage = document.getElementById('previousMileage').value;
+            const currentMileage = document.getElementById('currentMileage').value;
+            const kwhBefore = document.getElementById('kwhBefore').value;
+
+            if (!date || !licensePlate || !chargerName || !currentMileage || !kwhBefore) {
+                Swal.fire('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกข้อมูลให้ครบถ้วน', 'warning'); return;
+            }
+            if (vehicleStatuses[licensePlate]?.status !== 'available') {
+                Swal.fire('ไม่สามารถเริ่มชาร์จได้', `รถ ${licensePlate} ไม่พร้อมใช้งาน`, 'error'); return;
+            }
+             if (chargerStatuses[chargerName]?.status !== 'available') {
+                Swal.fire('ไม่สามารถเริ่มชาร์จได้', `เครื่องชาร์จ ${chargerName} ไม่พร้อมใช้งาน`, 'error'); return;
+            }
+            if (previousMileage && parseFloat(currentMileage) <= parseFloat(previousMileage)) {
+                Swal.fire('เลขไมล์ไม่ถูกต้อง', 'เลขไมล์ปัจจุบันต้องมากกว่าเลขไมล์ครั้งก่อน', 'warning'); return;
+            }
+
+            const sessionId = `${licensePlate}-${Date.now()}`;
+            const now = new Date();
+            const startTime = now.toTimeString().slice(0, 5);
+            
+            const newSession = {
+                date, licensePlate, chargerName, startTime,
+                previousMileage: previousMileage || '0',
+                currentMileage, kwhBefore,
+                status: 'charging',
+                startedBy: currentUser.name,
+                startedAt: now.toISOString()
+            };
+            
+            const batch = writeBatch(db);
+            const activeSessionRef = doc(db, `artifacts/${appId}/active_sessions`, sessionId);
+            batch.set(activeSessionRef, newSession);
+            
+            const stateDocRef = doc(db, `artifacts/${appId}/state/main`);
+            batch.update(stateDocRef, {
+                [`vehicleStatuses.${licensePlate}.status`]: 'charging',
+                [`vehicleStatuses.${licensePlate}.sessionId`]: sessionId,
+                [`chargerStatuses.${chargerName}.status`]: 'in-use',
+                [`chargerStatuses.${chargerName}.sessionId`]: sessionId
+            });
+
+            try {
+                await batch.commit();
+                resetNewChargingForm();
+                Swal.fire('เริ่มชาร์จแล้ว!', `เริ่มบันทึกการชาร์จสำหรับรถ ${licensePlate}`, 'success');
+            } catch (error) {
+                console.error("Error starting charging session:", error);
+                Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถเริ่มการชาร์จได้', 'error');
+            }
+        });
+
+        window.finishAndSaveCharging = async function(sessionId) {
+            const kwhAfterInput = document.getElementById(`kwhAfter-${sessionId}`);
+            const kwhAfter = kwhAfterInput.value;
+
+            const activeSessionRef = doc(db, `artifacts/${appId}/active_sessions`, sessionId);
+            const sessionDoc = await getDoc(activeSessionRef);
+            if (!sessionDoc.exists()) { Swal.fire('ผิดพลาด', 'ไม่พบข้อมูลการชาร์จนี้', 'error'); return; }
+            const session = sessionDoc.data();
+
+            if (!kwhAfter || parseFloat(kwhAfter) <= parseFloat(session.kwhBefore)) {
+                Swal.fire('ข้อมูลไม่ถูกต้อง', 'กรุณากรอกเปอร์เซ็นต์หลังชาร์จให้ถูกต้อง', 'warning'); return;
+            }
+
+            const result = await Swal.fire({
+                title: 'ยืนยันการจบและบันทึก',
+                text: "คุณต้องการจบและบันทึกข้อมูลการชาร์จนี้ใช่หรือไม่?",
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#10B981',
+                cancelButtonColor: '#6B7280',
+                confirmButtonText: 'ใช่, บันทึกเลย!',
+                cancelButtonText: 'ยกเลิก'
+            });
+
+            if (result.isConfirmed) {
+                Swal.fire({ title: 'กำลังบันทึก...', html: 'กรุณารอสักครู่', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                
+                const now = new Date();
+                const endTime = now.toTimeString().slice(0, 5);
+            
+                const kwhDifference = parseFloat(kwhAfter) - parseFloat(session.kwhBefore);
+                const durationInMinutes = kwhDifference * 1.45;
+                const units = (durationInMinutes * 16) / 60;
+                
+                const [startHours, startMinutes] = session.startTime.split(':').map(Number);
+                const timeInMinutes = startHours * 60 + startMinutes;
+                let pricePerUnit = 3.5;
+                if ((timeInMinutes >= 720 && timeInMinutes < 780) || (timeInMinutes >= 1020 && timeInMinutes < 1050)) {
+                    pricePerUnit = 4.1839;
+                } else if ((timeInMinutes >= 0 && timeInMinutes < 60) || (timeInMinutes >= 300 && timeInMinutes < 330)) {
+                    pricePerUnit = 2.6037;
+                }
+                const electricityCost = units * pricePerUnit;
+
+                const historyData = { 
+                    ...session,
+                    endTime, 
+                    duration: `${Math.round(durationInMinutes)}`,
+                    kwhAfter: kwhAfter,
+                    pricePerUnit: pricePerUnit.toFixed(4), 
+                    units: units.toFixed(2), 
+                    electricityCost: electricityCost.toFixed(2),
+                    status: 'saved', 
+                    recordedBy: currentUser.name, 
+                    recordedAt: now.toISOString()
+                };
+
+                const batch = writeBatch(db);
+                const historyDocRef = doc(collection(db, `artifacts/${appId}/history`));
+                batch.set(historyDocRef, historyData);
+                batch.delete(activeSessionRef);
+
+                const stateDocRef = doc(db, `artifacts/${appId}/state/main`);
+                batch.update(stateDocRef, {
+                    [`vehicleStatuses.${session.licensePlate}.status`]: 'available',
+                    [`vehicleStatuses.${session.licensePlate}.sessionId`]: null,
+                    [`vehicleStatuses.${session.licensePlate}.lastMileage`]: session.currentMileage,
+                    [`chargerStatuses.${session.chargerName}.status`]: 'available',
+                    [`chargerStatuses.${session.chargerName}.sessionId`]: null,
+                    [`chargerStatuses.${session.chargerName}.totalUsage`]: (chargerStatuses[session.chargerName]?.totalUsage || 0) + 1
+                });
+
+                try {
+                    await batch.commit();
+                    
+                    if (vehicleStatuses[session.licensePlate]) {
+                        vehicleStatuses[session.licensePlate].lastMileage = session.currentMileage;
+                    }
+
+                    Swal.fire('บันทึกสำเร็จ!', `ข้อมูลการชาร์จรถ ${session.licensePlate} ถูกบันทึกแล้ว`, 'success');
+                    
+                    resetNewChargingForm();
+
+                } catch (error) {
+                    console.error("Error saving data:", error);
+                    Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้', 'error');
+                }
+            }
+        }
+
+        window.selectLicensePlate = async function(plate) {
+            document.querySelectorAll('.license-btn').forEach(btn => btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600'));
+            document.getElementById(`btn-${plate}`).classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            document.getElementById('licensePlate').value = plate;
+            
+            const previousMileage = vehicleStatuses[plate]?.lastMileage || 0;
+            const previousMileageField = document.getElementById('previousMileage');
+            if (previousMileage > 0) {
+                 previousMileageField.value = previousMileage;
+            } else {
+                 previousMileageField.value = '';
+                 previousMileageField.placeholder = 'ไม่พบข้อมูลก่อนหน้า';
+            }
+        }
+        
+        window.selectCharger = function(charger) {
+            document.querySelectorAll('.charger-btn').forEach(btn => btn.classList.remove('bg-green-600', 'text-white', 'border-green-600'));
+            document.getElementById(`btn-charger-${charger}`).classList.add('bg-green-600', 'text-white', 'border-green-600');
+            document.getElementById('chargerName').value = charger;
+        }
+
+        function createLicensePlateButtons() {
+            const container = document.getElementById('licensePlateButtons');
+            container.innerHTML = '';
+            vehicles.forEach(vehicle => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.id = `btn-${vehicle}`;
+                button.className = 'license-btn px-4 py-3 border-2 border-gray-300 rounded-lg hover:border-blue-500 transition duration-200 font-semibold';
+                button.textContent = vehicle;
+                button.onclick = () => window.selectLicensePlate(vehicle);
+                container.appendChild(button);
+            });
+        }
+
+        function createChargerButtons() {
+            const container = document.getElementById('chargerButtons');
+            container.innerHTML = '';
+            chargers.forEach(charger => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.id = `btn-charger-${charger}`;
+                button.className = 'charger-btn px-4 py-3 border-2 border-gray-300 rounded-lg hover:border-green-500 transition duration-200 font-semibold';
+                button.textContent = charger;
+                button.onclick = () => window.selectCharger(charger);
+                container.appendChild(button);
+            });
+        }
+        
+        function setTodayDate() { document.getElementById('date').valueAsDate = new Date(); }
+        
+        window.toggleNewChargingForm = function() {
+            const container = document.getElementById('newChargingFormContainer');
+            const toggleText = document.getElementById('toggleFormText');
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                toggleText.textContent = 'ซ่อน';
+            } else {
+                container.style.display = 'none';
+                toggleText.textContent = 'แสดง';
+            }
+        }
+
+        function resetNewChargingForm() {
+            document.getElementById('newChargingForm').reset();
+            setTodayDate();
+            if (currentUser.role === 'employee') {
+                prepopulateForm(currentUser.vehicle, currentUser.charger);
+            }
+        }
+
+        function updatePricePerUnitDisplay() {
+            const now = new Date();
+            const timeInMinutes = now.getHours() * 60 + now.getMinutes();
+            let pricePerUnit = 3.5, timeType = 'ช่วงปกติ', color = 'text-yellow-600 bg-yellow-50';
+            if ((timeInMinutes >= 720 && timeInMinutes < 780) || (timeInMinutes >= 1020 && timeInMinutes < 1050)) {
+                pricePerUnit = 4.1839; timeType = 'ช่วงพีค'; color = 'text-red-600 bg-red-50';
+            } else if ((timeInMinutes >= 0 && timeInMinutes < 60) || (timeInMinutes >= 300 && timeInMinutes < 330)) {
+                pricePerUnit = 2.6037; timeType = 'ช่วงออฟพีค'; color = 'text-green-600 bg-green-50';
+            }
+            const display = document.getElementById('pricePerUnitDisplay');
+            if (display) {
+                display.className = `w-full px-4 py-3 border border-gray-300 rounded-lg font-medium ${color}`;
+                display.textContent = `${pricePerUnit.toFixed(4)} บาท (${timeType})`;
+            }
+        }
+        
+        window.showSection = function(section) {
+            document.getElementById('chargingSection').classList.add('hidden');
+            document.getElementById('summarySection').classList.add('hidden');
+            document.getElementById('btn-charging').className = 'px-6 py-2 rounded-lg font-medium transition duration-200 text-gray-600 hover:bg-gray-100';
+            document.getElementById('btn-summary').className = 'px-6 py-2 rounded-lg font-medium transition duration-200 text-gray-600 hover:bg-gray-100';
+            if (section === 'charging') {
+                document.getElementById('chargingSection').classList.remove('hidden');
+                document.getElementById('btn-charging').className = 'px-6 py-2 rounded-lg font-medium transition duration-200 bg-blue-600 text-white';
+            } else if (section === 'summary') {
+                document.getElementById('summarySection').classList.remove('hidden');
+                document.getElementById('btn-summary').className = 'px-6 py-2 rounded-lg font-medium transition duration-200 bg-blue-600 text-white';
+                loadSummaryData();
+            }
+        }
+        
+        function initializeHistoryFilters() {
+            const vehicleFilter = document.getElementById('historyVehicleFilter');
+            vehicleFilter.innerHTML = '<option value="">ทุกคัน</option>';
+            vehicles.forEach(v => vehicleFilter.innerHTML += `<option value="${v}">${v}</option>`);
+            
+            const monthFilter = document.getElementById('historyMonthFilter');
+            monthFilter.innerHTML = '<option value="">ทุกเดือน</option>';
+            const currentDate = new Date();
+            for (let i = 0; i < 12; i++) {
+                const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+                const monthValue = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+                const monthText = date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                monthFilter.innerHTML += `<option value="${monthValue}">${monthText}</option>`;
+            }
+        }
+        
+        function displayChargingHistory(records) {
+            const container = document.getElementById('chargingHistoryContainer');
+            const vehicleFilter = document.getElementById('historyVehicleFilter').value;
+            const monthFilter = document.getElementById('historyMonthFilter').value;
+
+            let filteredRecords = records;
+            if (vehicleFilter) filteredRecords = filteredRecords.filter(r => r.licensePlate === vehicleFilter);
+            if (monthFilter) filteredRecords = filteredRecords.filter(r => r.date.startsWith(monthFilter));
+
+            if (filteredRecords.length === 0) {
+                container.innerHTML = `<div class="text-center text-gray-500 py-8">ไม่พบข้อมูลตามตัวกรอง</div>`;
+                return;
+            }
+            const groupedData = groupRecordsByVehicleMonthWeek(filteredRecords);
+            container.innerHTML = '<div class="overflow-x-auto"></div>';
+            buildHistoryDOM(groupedData, container.firstElementChild);
+        }
+
+        function buildHistoryDOM(groupedData, container) {
+            Object.keys(groupedData).sort().forEach(vehicle => {
+                const vehicleData = groupedData[vehicle];
+                const vehicleSection = document.createElement('div');
+                vehicleSection.className = 'mb-8';
+                vehicleSection.innerHTML = `<div class="bg-blue-50 border-l-4 border-blue-500 p-4 mb-4"><h3 class="text-lg font-bold text-blue-800">🚗 รถ ${vehicle}</h3></div>`;
+                
+                Object.keys(vehicleData).sort().reverse().forEach(month => {
+                    const monthData = vehicleData[month];
+                    const monthTotals = calculateTotals(Object.values(monthData).flat());
+                    const monthSection = document.createElement('div');
+                    monthSection.className = 'mb-6';
+                    monthSection.innerHTML = `<div class="bg-gray-50 border border-gray-200 rounded-t-lg p-4"><div class="flex justify-between items-center"><h4 class="text-md font-semibold text-gray-800">📅 ${formatMonthToThai(month)}</h4><div class="text-sm text-gray-600"><span class="mr-4">ครั้ง: ${monthTotals.count}</span><span class="mr-4">หน่วย: ${monthTotals.units.toFixed(2)}</span><span class="text-green-600 font-semibold">฿${monthTotals.cost.toFixed(2)}</span></div></div></div>`;
+                    
+                    const weeksContainer = document.createElement('div');
+                    weeksContainer.className = 'border-l border-r border-b border-gray-200 rounded-b-lg';
+                    Object.keys(monthData).sort().forEach((week, index) => {
+                        const weekRecords = monthData[week];
+                        const weekTotals = calculateTotals(weekRecords);
+                        const weekId = `week-${vehicle}-${month}-${week.replace(/ /g, '-')}`;
+                        const weekSection = document.createElement('div');
+                        weekSection.className = index > 0 ? 'border-t border-gray-100' : '';
+                        weekSection.innerHTML = `<div class="bg-white p-3 cursor-pointer hover:bg-gray-50" onclick="window.toggleWeekDetails('${weekId}')"><div class="flex justify-between items-center"><div class="flex items-center"><span class="text-sm font-medium text-gray-700">📊 ${week}</span><span id="toggle-icon-${weekId}" class="ml-2 text-gray-400">▼</span></div><div class="text-sm text-gray-600"><span class="mr-3">ครั้ง: ${weekTotals.count}</span><span class="mr-3">หน่วย: ${weekTotals.units.toFixed(2)}</span><span class="text-green-600 font-medium">฿${weekTotals.cost.toFixed(2)}</span></div></div></div><div id="${weekId}" class="hidden bg-gray-50 p-4 overflow-x-auto"><table class="w-full text-sm whitespace-nowrap"><thead><tr class="text-gray-600"><th class="text-left py-2 px-2">วันที่</th><th class="text-left py-2 px-2">เครื่องชาร์จ</th><th class="text-left py-2 px-2">เวลา</th><th class="text-left py-2 px-2">ระยะเวลา</th><th class="text-left py-2 px-2">% ก่อน</th><th class="text-left py-2 px-2">% หลัง</th><th class="text-left py-2 px-2">หน่วย</th><th class="text-left py-2 px-2">ราคา/หน่วย</th><th class="text-left py-2 px-2">ค่าไฟ</th><th class="text-left py-2 px-2">ผู้บันทึก</th></tr></thead><tbody>${weekRecords.map(record => `
+                            <tr class="border-t border-gray-200"><td class="py-2 px-2">${formatDateToThai(record.date)}</td><td class="py-2 px-2 text-green-600">${record.chargerName || '-'}</td><td class="py-2 px-2">${formatTimeToShort(record.startTime || '-')}${record.endTime ? ' - ' + formatTimeToShort(record.endTime) : ''}</td><td class="py-2 px-2">${record.duration || '-'} นาที</td><td class="py-2 px-2 text-gray-600">${record.kwhBefore}%</td><td class="py-2 px-2 text-gray-600">${record.kwhAfter || '-'}%</td><td class="py-2 px-2">${record.units || '-'}</td><td class="py-2 px-2 text-blue-600">฿${parseFloat(record.pricePerUnit || 0).toFixed(4)}</td><td class="py-2 px-2 text-green-600">฿${parseFloat(record.electricityCost || 0).toFixed(2)}</td><td class="py-2 px-2 font-medium">${record.recordedBy || '-'}</td></tr>`).join('')}</tbody></table></div>`;
+                        weeksContainer.appendChild(weekSection);
+                    });
+                    monthSection.appendChild(weeksContainer);
+                    vehicleSection.appendChild(monthSection);
+                });
+                container.appendChild(vehicleSection);
+            });
+        }
+        
+        window.toggleWeekDetails = function(weekId) {
+            const details = document.getElementById(weekId);
+            const icon = document.getElementById(`toggle-icon-${weekId}`);
+            details.classList.toggle('hidden');
+            icon.textContent = details.classList.contains('hidden') ? '▼' : '▲';
+        }
+
+        function initializeSummaryFilters() {
+            const vehicleFilter = document.getElementById('summaryVehicleFilter');
+            vehicleFilter.innerHTML = '<option value="">ทุกคัน</option>';
+            vehicles.forEach(v => vehicleFilter.innerHTML += `<option value="${v}">${v}</option>`);
+            
+            const monthFilter = document.getElementById('summaryMonthFilter');
+            monthFilter.innerHTML = '<option value="">ทุกเดือน</option>';
+            const currentDate = new Date();
+            for (let i = 0; i < 12; i++) {
+                const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+                const monthValue = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+                const monthText = date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+                monthFilter.innerHTML += `<option value="${monthValue}">${monthText}</option>`;
+            }
+        }
+        
+        function loadSummaryData() {
+            const vehicleFilter = document.getElementById('summaryVehicleFilter').value;
+            const monthFilter = document.getElementById('summaryMonthFilter').value;
+
+            let filteredRecords = allHistoryRecords;
+            if (vehicleFilter) filteredRecords = filteredRecords.filter(r => r.licensePlate === vehicleFilter);
+            if (monthFilter) filteredRecords = filteredRecords.filter(r => r.date.startsWith(monthFilter));
+            
+            if (filteredRecords.length > 0) {
+                const summaryData = calculateSummaryStatistics(filteredRecords);
+                updateSummaryCards(summaryData);
+                updateSummaryCharts(summaryData);
+                updateVehicleStatsTable(summaryData.vehicleStats);
+                updateChargerStatsTable(summaryData.chargerStats);
+            } else {
+                updateSummaryCards({ totalSessions: 0, totalCost: 0, totalUnits: 0, totalMinutes: 0 });
+                Object.values(summaryCharts).forEach(chart => chart && chart.destroy());
+                document.getElementById('vehicleStatsContainer').innerHTML = '<div class="text-center text-gray-500 py-8">ไม่พบข้อมูล</div>';
+                document.getElementById('chargerStatsContainer').innerHTML = '<div class="text-center text-gray-500 py-8">ไม่พบข้อมูล</div>';
+            }
+        }
+
+        function calculateSummaryStatistics(records) {
+            let totalSessions = 0, totalCost = 0, totalUnits = 0, totalMinutes = 0;
+            const vehicleStats = {}, monthlyData = {}, chargerStats = {};
+            
+            // Initialize stats for all vehicles and chargers to ensure they appear in the summary
+            vehicles.forEach(v => { vehicleStats[v] = { sessions: 0, cost: 0, units: 0, minutes: 0 }; });
+            chargers.forEach(c => { chargerStats[c] = { sessions: 0, cost: 0, units: 0, minutes: 0 }; });
+
+            records.forEach(record => {
+                totalSessions++;
+                const cost = parseFloat(record.electricityCost) || 0;
+                const units = parseFloat(record.units) || 0;
+                const duration = parseInt(record.duration) || 0;
+                totalCost += cost;
+                totalUnits += units;
+                totalMinutes += duration;
+                
+                const vehicle = record.licensePlate;
+                if (vehicle && vehicleStats[vehicle]) {
+                    vehicleStats[vehicle].sessions++;
+                    vehicleStats[vehicle].cost += cost;
+                    vehicleStats[vehicle].units += units;
+                    vehicleStats[vehicle].minutes += duration;
+                }
+
+                const charger = record.chargerName;
+                if(charger && chargerStats[charger]) {
+                    chargerStats[charger].sessions++;
+                    chargerStats[charger].cost += cost;
+                    chargerStats[charger].units += units;
+                    chargerStats[charger].minutes += duration;
+                }
+                
+                const monthKey = record.date.substring(0, 7);
+                if (!monthlyData[monthKey]) monthlyData[monthKey] = { sessions: 0, cost: 0, units: 0 };
+                monthlyData[monthKey].sessions++;
+                monthlyData[monthKey].cost += cost;
+                monthlyData[monthKey].units += units;
+            });
+            return { totalSessions, totalCost, totalUnits, totalMinutes, vehicleStats, monthlyData, chargerStats };
+        }
+        function updateSummaryCards(data) {
+            document.getElementById('totalSessions').textContent = data.totalSessions.toLocaleString();
+            document.getElementById('totalCost').textContent = `฿${data.totalCost.toFixed(2)}`;
+            document.getElementById('totalUnits').textContent = data.totalUnits.toFixed(2);
+            const hours = Math.floor(data.totalMinutes / 60);
+            const minutes = data.totalMinutes % 60;
+            document.getElementById('totalTime').textContent = hours > 0 ? `${hours} ชม. ${minutes} นาที` : `${minutes} นาที`;
+        }
+        function updateSummaryCharts(data) { 
+            Object.values(summaryCharts).forEach(chart => chart && chart.destroy());
+            const vehicleNames = Object.keys(data.vehicleStats).sort((a, b) => parseInt(a.split('-')[1]) - parseInt(b.split('-')[1]));
+            
+            const costCtx = document.getElementById('costChart').getContext('2d');
+            summaryCharts.costChart = new Chart(costCtx, {
+                type: 'bar',
+                data: {
+                    labels: vehicleNames,
+                    datasets: [{
+                        label: 'ค่าไฟ',
+                        data: vehicleNames.map(v => data.vehicleStats[v].cost),
+                        backgroundColor: '#10B981'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return 'ค่าไฟ: ฿' + context.parsed.y.toFixed(2);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '฿' + value.toFixed(2);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            const sessionsCtx = document.getElementById('sessionsChart').getContext('2d');
+            summaryCharts.sessionsChart = new Chart(sessionsCtx, { type: 'bar', data: { labels: vehicleNames, datasets: [{ label: 'จำนวนครั้ง', data: vehicleNames.map(v => data.vehicleStats[v].sessions), backgroundColor: '#3B82F6' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } } });
+            
+            const chargerNames = Object.keys(data.chargerStats).sort();
+            const chargerUsageCtx = document.getElementById('chargerUsageChart').getContext('2d');
+            summaryCharts.chargerUsageChart = new Chart(chargerUsageCtx, { type: 'bar', data: { labels: chargerNames, datasets: [{ label: 'จำนวนครั้ง', data: chargerNames.map(c => data.chargerStats[c].sessions), backgroundColor: '#F59E0B' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } } });
+
+
+            const monthlyCtx = document.getElementById('monthlyTrendChart').getContext('2d');
+            const sortedMonths = Object.keys(data.monthlyData).sort();
+            const monthLabels = sortedMonths.map(m => formatMonthToThai(m));
+            summaryCharts.monthlyTrendChart = new Chart(monthlyCtx, {
+                type: 'line',
+                data: {
+                    labels: monthLabels,
+                    datasets: [{
+                        label: 'ค่าไฟ (บาท)',
+                        data: sortedMonths.map(m => data.monthlyData[m].cost),
+                        borderColor: '#10B981',
+                        yAxisID: 'y'
+                    }, {
+                        label: 'จำนวนครั้ง',
+                        data: sortedMonths.map(m => data.monthlyData[m].sessions),
+                        borderColor: '#3B82F6',
+                        yAxisID: 'y1'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            ticks: {
+                                callback: function(value) {
+                                    return '฿' + value.toFixed(2);
+                                }
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false
+                            },
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        function updateVehicleStatsTable(vehicleStats) { 
+            const container = document.getElementById('vehicleStatsContainer');
+            container.innerHTML = '';
+            if (Object.keys(vehicleStats).length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-8">ไม่พบข้อมูล</div>';
+                return;
+            }
+            const sortedVehicles = Object.keys(vehicleStats).sort();
+            sortedVehicles.forEach((vehicle, index) => {
+                const stats = vehicleStats[vehicle];
+                const avgPerSession = stats.sessions > 0 ? stats.cost / stats.sessions : 0;
+                const hours = Math.floor(stats.minutes / 60);
+                const minutes = stats.minutes % 60;
+                const vehicleSection = document.createElement('div');
+                vehicleSection.className = `border border-gray-200 rounded-lg ${index > 0 ? 'mt-4' : ''}`;
+                vehicleSection.innerHTML = `<div class="bg-blue-50 border-l-4 border-blue-500 p-4 cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')"><div class="flex justify-between items-center"><h4 class="text-lg font-bold text-blue-800">🚗 รถ ${vehicle}</h4><div class="text-sm text-blue-600"><span class="mr-4">รวม ${stats.sessions} ครั้ง</span><span class="font-semibold text-green-600">฿${stats.cost.toFixed(2)}</span></div></div></div><div class="hidden bg-gray-50 p-4 border-t border-gray-200"><div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm"><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">จำนวนครั้ง</div><div class="font-bold text-xl text-blue-600">${stats.sessions}</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">เวลารวม</div><div class="font-bold text-xl text-purple-600">${hours} ชม. ${minutes} นาที</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">หน่วยรวม</div><div class="font-bold text-xl text-orange-600">${stats.units.toFixed(1)}</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">ค่าไฟรวม</div><div class="font-bold text-xl text-green-600">฿${stats.cost.toFixed(0)}</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">เฉลี่ย/ครั้ง</div><div class="font-bold text-xl text-indigo-600">฿${avgPerSession.toFixed(0)}</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">ราคา/หน่วย</div><div class="font-bold text-xl text-pink-600">฿${stats.units > 0 ? (stats.cost / stats.units).toFixed(2) : '0'}</div></div></div></div>`;
+                container.appendChild(vehicleSection);
+            });
+        }
+        function updateChargerStatsTable(chargerStats) { 
+            const container = document.getElementById('chargerStatsContainer');
+            container.innerHTML = '';
+            if (Object.keys(chargerStats).length === 0) {
+                container.innerHTML = '<div class="text-center text-gray-500 py-8">ไม่พบข้อมูล</div>';
+                return;
+            }
+            const sortedChargers = Object.keys(chargerStats).sort();
+            sortedChargers.forEach((charger, index) => {
+                const stats = chargerStats[charger];
+                const avgPerSession = stats.sessions > 0 ? stats.cost / stats.sessions : 0;
+                const hours = Math.floor(stats.minutes / 60);
+                const minutes = stats.minutes % 60;
+                const chargerSection = document.createElement('div');
+                chargerSection.className = `border border-gray-200 rounded-lg ${index > 0 ? 'mt-4' : ''}`;
+                chargerSection.innerHTML = `<div class="bg-green-50 border-l-4 border-green-500 p-4 cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')"><div class="flex justify-between items-center"><h4 class="text-lg font-bold text-green-800">🔌 เครื่องชาร์จ ${charger}</h4><div class="text-sm text-green-600"><span class="mr-4">รวม ${stats.sessions} ครั้ง</span><span class="font-semibold text-green-800">฿${stats.cost.toFixed(2)}</span></div></div></div><div class="hidden bg-gray-50 p-4 border-t border-gray-200"><div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 text-sm"><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">จำนวนครั้ง</div><div class="font-bold text-xl text-blue-600">${stats.sessions}</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">เวลารวม</div><div class="font-bold text-xl text-purple-600">${hours} ชม. ${minutes} นาที</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">หน่วยรวม</div><div class="font-bold text-xl text-orange-600">${stats.units.toFixed(1)}</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">ค่าไฟรวม</div><div class="font-bold text-xl text-green-600">฿${stats.cost.toFixed(0)}</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">เฉลี่ย/ครั้ง</div><div class="font-bold text-xl text-indigo-600">฿${avgPerSession.toFixed(0)}</div></div><div class="text-center bg-white rounded-lg p-3 shadow-sm"><div class="text-gray-600 text-xs mb-1">ราคา/หน่วย</div><div class="font-bold text-xl text-pink-600">฿${stats.units > 0 ? (stats.cost / stats.units).toFixed(2) : '0'}</div></div></div></div>`;
+                container.appendChild(chargerSection);
+            });
+        }
+        function groupRecordsByVehicleMonthWeek(records) { 
+            const grouped = {};
+            records.forEach(record => {
+                const vehicle = record.licensePlate;
+                const date = new Date(record.date);
+                const month = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+                const weekOfMonth = Math.ceil((date.getDate() + new Date(date.getFullYear(), date.getMonth(), 1).getDay()) / 7);
+                const week = `สัปดาห์ที่ ${weekOfMonth}`;
+                if (!grouped[vehicle]) grouped[vehicle] = {};
+                if (!grouped[vehicle][month]) grouped[vehicle][month] = {};
+                if (!grouped[vehicle][month][week]) grouped[vehicle][month][week] = [];
+                grouped[vehicle][month][week].push(record);
+            });
+            return grouped;
+        }
+        function calculateTotals(records) { 
+            return records.reduce((acc, r) => ({ count: acc.count + 1, units: acc.units + (parseFloat(r.units) || 0), cost: acc.cost + (parseFloat(r.electricityCost) || 0) }), { count: 0, units: 0, cost: 0 });
+        }
+        function formatMonthToThai(monthString) { 
+            const [year, month] = monthString.split('-');
+            return new Date(year, month - 1).toLocaleDateString('th-TH', { year: 'numeric', month: 'long' });
+        }
+        function formatDateToThai(dateString) { 
+            if (!dateString) return '-';
+            const date = new Date(dateString);
+            return date.toLocaleDateString('th-TH', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+        function formatTimeToShort(timeString) { 
+            return timeString ? timeString.slice(0, 5) : '-';
+        }
+    </script>
+</body>
+</html>
